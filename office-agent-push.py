@@ -21,7 +21,11 @@ AGENT_NAME = "" # 必填：你在办公室里的名字
 OFFICE_URL = "https://office.example.com"  # 海辛办公室地址（一般不用改）
 
 # === 推送配置 ===
-PUSH_INTERVAL_SECONDS = 15  # 每隔多少秒推送一次（更实时）
+# 旧版是固定 15s 推送，状态切换体感偏慢。
+# 新版默认：状态变化立即推；并保留低频心跳保活。
+PUSH_INTERVAL_SECONDS = float(os.environ.get("OFFICE_PUSH_INTERVAL", "2"))  # 心跳间隔（秒）
+POLL_INTERVAL_SECONDS = float(os.environ.get("OFFICE_POLL_INTERVAL", "0.4"))  # 本地状态轮询间隔（秒）
+MIN_PUSH_GAP_SECONDS = float(os.environ.get("OFFICE_MIN_PUSH_GAP", "0.8"))   # 两次推送最小间隔（秒）
 STATUS_ENDPOINT = "/status"
 JOIN_ENDPOINT = "/join-agent"
 PUSH_ENDPOINT = "/agent-push"
@@ -217,7 +221,7 @@ def do_join(local):
     return False
 
 
-def do_push(local, status_data):
+def do_push(local, status_data, quiet=False):
     import requests
     payload = {
         "agentId": local.get("agentId"),
@@ -231,7 +235,8 @@ def do_push(local, status_data):
         data = r.json()
         if data.get("ok"):
             area = data.get("area", "breakroom")
-            print(f"✅ 状态已同步，当前区域={area}")
+            if (not quiet) or VERBOSE:
+                print(f"✅ 状态已同步，当前区域={area}")
             return True
 
     # 403/404：拒绝/移除 → 停止推送
@@ -265,18 +270,38 @@ def main():
         if not ok:
             sys.exit(1)
 
-    # 持续推送
-    print(f"🚀 开始持续推送状态，间隔={PUSH_INTERVAL_SECONDS}秒")
+    # 持续推送（变化秒推 + 心跳保活）
+    print(f"🚀 开始持续推送状态：心跳={PUSH_INTERVAL_SECONDS}s，轮询={POLL_INTERVAL_SECONDS}s")
     print("🧭 状态逻辑：任务中→工作区；待命/完成→休息区；异常→bug区")
     print("🔐 若本地 /status 返回 Unauthorized(401)，请设置环境变量：OFFICE_LOCAL_STATUS_TOKEN 或 OFFICE_LOCAL_STATUS_URL")
+
+    last_state = None
+    last_detail = None
+    last_push_at = 0.0
+    next_heartbeat_at = 0.0
+
     try:
         while True:
+            now = time.time()
             try:
                 status_data = fetch_local_status()
-                do_push(local, status_data)
+                s = status_data.get("state", "idle")
+                d = status_data.get("detail", "")
+
+                changed = (s != last_state) or (d != last_detail)
+                heartbeat_due = now >= next_heartbeat_at
+                min_gap_ok = (now - last_push_at) >= MIN_PUSH_GAP_SECONDS
+
+                if min_gap_ok and (changed or heartbeat_due):
+                    ok = do_push(local, status_data, quiet=(not changed))
+                    if ok:
+                        last_state, last_detail = s, d
+                        last_push_at = now
+                        next_heartbeat_at = now + PUSH_INTERVAL_SECONDS
             except Exception as e:
                 print(f"⚠️  推送异常：{e}")
-            time.sleep(PUSH_INTERVAL_SECONDS)
+
+            time.sleep(POLL_INTERVAL_SECONDS)
     except KeyboardInterrupt:
         print("\n👋 停止推送")
         sys.exit(0)

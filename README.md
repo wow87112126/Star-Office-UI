@@ -303,6 +303,16 @@ bash scripts/state_guard.sh --state syncing --detail "正在执行任务" -- <co
 
 更多见：`docs/CHAT_STATUS_REALTIME.md`
 
+### D.2 推送“秒级同步”建议（office-agent-push）
+
+`office-agent-push.py` 已支持“状态变化立即推 + 低频心跳保活”。
+默认参数：
+- `OFFICE_POLL_INTERVAL=0.4`（本地轮询）
+- `OFFICE_MIN_PUSH_GAP=0.8`（防抖）
+- `OFFICE_PUSH_INTERVAL=2`（心跳）
+
+通常体感会明显快于旧版固定 15 秒推送。
+
 ### E) 美术与版权口径更新（重要）
 
 本次重制重点之一是美术资产系统升级（大规模替换 + 命名与索引重建）。
