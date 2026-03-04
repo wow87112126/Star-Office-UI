@@ -1682,7 +1682,7 @@
         let guestTweens = {};  // agentId -> {move, name}
         let hiddenDemoNames = new Set();
         const DEMO_MODE = new URLSearchParams(window.location.search).get('demo') === '1';
-        const FETCH_INTERVAL = 2000;
+        const FETCH_INTERVAL = 1000;
         const GUEST_AGENTS_FETCH_INTERVAL = 3500;
         const BLINK_INTERVAL = 2500;
         const BUBBLE_INTERVAL = 8000;
@@ -4491,6 +4491,81 @@ function toggleBrokerPanel() {
             return s;
         }
 
+        function applyVisualState(nextState) {
+            // Idle: show Star idle animation (main character)
+            if (nextState === 'idle') {
+                sofa.anims.stop();
+                sofa.setTexture('sofa_idle');
+
+                if (window.starWorking) {
+                    window.starWorking.setVisible(false);
+                    window.starWorking.anims.stop();
+                }
+
+                star.setVisible(true);
+                star.setScale(IDLE_STAR_SCALE);
+                star.anims.play('star_idle', true);
+                star.setPosition(IDLE_SOFA_ANCHOR.x, IDLE_SOFA_ANCHOR.y);
+            } else if (nextState === 'error') {
+                // Error: no working animation at desk
+                sofa.anims.stop();
+                sofa.setTexture('sofa_idle');
+                star.setVisible(false);
+                star.anims.stop();
+                if (window.starWorking) {
+                    window.starWorking.setVisible(false);
+                    window.starWorking.anims.stop();
+                }
+            } else if (nextState === 'syncing') {
+                // Syncing: also no working animation at desk
+                sofa.anims.stop();
+                sofa.setTexture('sofa_idle');
+                star.setVisible(false);
+                star.anims.stop();
+                if (window.starWorking) {
+                    window.starWorking.setVisible(false);
+                    window.starWorking.anims.stop();
+                }
+            } else {
+                // Non-idle non-error: starWorking animation at desk
+                sofa.anims.stop();
+                sofa.setTexture('sofa_idle');
+                // Hide moving star, show desk star
+                star.setVisible(false);
+                star.anims.stop();
+                if (window.starWorking) {
+                    window.starWorking.setVisible(true);
+                    window.starWorking.anims.play('star_working', true);
+                }
+            }
+
+            // Server room logic
+            if (serverroom) {
+                if (nextState === 'idle') {
+                    serverroom.anims.stop();
+                    serverroom.setFrame(0);
+                } else {
+                    serverroom.anims.play('serverroom_on', true);
+                }
+            }
+
+            // Sync animation logic: default frame0; syncing play loop
+            if (syncAnimSprite) {
+                if (nextState === 'syncing') {
+                    if (syncAnimPlayable && syncAnimSprite.anims && syncAnimSprite.anims.play && syncAnimSprite.scene?.anims?.exists('sync_anim')) {
+                        if (!syncAnimSprite.anims.isPlaying || syncAnimSprite.anims.currentAnim?.key !== 'sync_anim') {
+                            syncAnimSprite.anims.play('sync_anim', true);
+                        }
+                    } else {
+                        syncAnimSprite.setFrame(0);
+                    }
+                } else {
+                    if (syncAnimSprite.anims && syncAnimSprite.anims.isPlaying) syncAnimSprite.anims.stop();
+                    syncAnimSprite.setFrame(0);
+                }
+            }
+        }
+
         function fetchStatus() {
             return fetch('/status', { cache: 'no-store' })
                 .then(response => response.json())
@@ -4501,89 +4576,17 @@ function toggleBrokerPanel() {
                         // If we're mid-transition, don't restart the path every poll
                         const changed = (pendingDesiredState === null) && (nextState !== currentState);
                         const nextLine = '[' + stateInfo.name + '] ' + (data.detail || '...');
+                        // 不论 changed 与否，都按服务端最新状态强制一次视觉同步，避免动画卡旧状态
+                        pendingDesiredState = null;
+                        if (currentState !== nextState) {
+                            currentState = nextState;
+                        }
+                        applyVisualState(nextState);
+
                         if (changed) {
                             typewriterTarget = nextLine;
                             typewriterText = '';
                             typewriterIndex = 0;
-
-                            // Set state immediately (no waypoints/path movement)
-                            pendingDesiredState = null;
-                            currentState = nextState;
-
-                            // Idle: show Star idle animation (main character)
-                            if (nextState === 'idle') {
-                                sofa.anims.stop();
-                                sofa.setTexture('sofa_idle');
-
-                                if (window.starWorking) {
-                                    window.starWorking.setVisible(false);
-                                    window.starWorking.anims.stop();
-                                }
-
-                                star.setVisible(true);
-                                star.setScale(IDLE_STAR_SCALE);
-                                star.anims.play('star_idle', true);
-                                star.setPosition(IDLE_SOFA_ANCHOR.x, IDLE_SOFA_ANCHOR.y);
-                            } else if (nextState === 'error') {
-                                // Error: no working animation at desk
-                                sofa.anims.stop();
-                                sofa.setTexture('sofa_idle');
-                                star.setVisible(false);
-                                star.anims.stop();
-                                if (window.starWorking) {
-                                    window.starWorking.setVisible(false);
-                                    window.starWorking.anims.stop();
-                                }
-                            } else if (nextState === 'syncing') {
-                                // Syncing: also no working animation at desk
-                                sofa.anims.stop();
-                                sofa.setTexture('sofa_idle');
-                                star.setVisible(false);
-                                star.anims.stop();
-                                if (window.starWorking) {
-                                    window.starWorking.setVisible(false);
-                                    window.starWorking.anims.stop();
-                                }
-                            } else {
-                                // Non-idle non-error: starWorking animation at desk
-                                sofa.anims.stop();
-                                sofa.setTexture('sofa_idle');
-                                // Hide moving star, show desk star
-                                star.setVisible(false);
-                                star.anims.stop();
-                                if (window.starWorking) {
-                                    window.starWorking.setVisible(true);
-                                    window.starWorking.anims.play('star_working', true);
-                                }
-                            }
-
-                            // Server room logic:
-                            if (serverroom) {
-                                if (nextState === 'idle') {
-                                    serverroom.anims.stop();
-                                    serverroom.setFrame(0);
-                                } else {
-                                    serverroom.anims.play('serverroom_on', true);
-                                }
-                            }
-
-                            // Sync animation logic:
-                            // default: frame 0
-                            // state=syncing: play from frame 1
-                            if (syncAnimSprite) {
-                                if (nextState === 'syncing') {
-                                    if (syncAnimPlayable && syncAnimSprite.anims && syncAnimSprite.anims.play && syncAnimSprite.scene?.anims?.exists('sync_anim')) {
-                                        if (!syncAnimSprite.anims.isPlaying || syncAnimSprite.anims.currentAnim?.key !== 'sync_anim') {
-                                            syncAnimSprite.anims.play('sync_anim', true);
-                                        }
-                                    } else {
-                                        syncAnimSprite.setFrame(0);
-                                    }
-                                } else {
-                                    if (syncAnimSprite.anims && syncAnimSprite.anims.isPlaying) syncAnimSprite.anims.stop();
-                                    syncAnimSprite.setFrame(0);
-                                }
-                            }
                         } else {
                             if (!typewriterTarget || typewriterTarget !== nextLine) {
                                 typewriterTarget = nextLine;
