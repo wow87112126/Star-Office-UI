@@ -108,11 +108,37 @@
             justify-content: center;
             align-items: center;
             z-index: 100000;
+            gap: 10px;
+        }
+        #loading-mascot-wrap {
+            width: 300px;
+            display: flex;
+            justify-content: flex-start;
+            margin-bottom: 2px;
+        }
+        #loading-mascot {
+            font-size: 28px;
+            line-height: 1;
+            filter: drop-shadow(0 2px 0 rgba(0,0,0,0.35));
+            transform: translateX(0);
+            transition: transform 0.28s ease;
+            animation: loading-mascot-bob 0.8s ease-in-out infinite;
+            will-change: transform;
+        }
+        @keyframes loading-mascot-bob {
+            0%, 100% { margin-top: 0; }
+            50% { margin-top: -6px; }
         }
         #loading-text {
             color: #ffd700;
             font-size: 18px;
-            margin-bottom: 20px;
+            margin-bottom: 4px;
+        }
+        #loading-subtext {
+            color: #cbd5e1;
+            font-size: 13px;
+            margin-bottom: 6px;
+            opacity: 0.9;
         }
         #loading-progress-container {
             width: 300px;
@@ -120,12 +146,38 @@
             background: #333;
             border: 2px solid #555;
             border-radius: 4px;
+            overflow: hidden;
         }
         #loading-progress-bar {
             height: 100%;
             background: linear-gradient(90deg, #e94560, #ffd700);
             width: 0%;
             transition: width 0.3s ease;
+        }
+        #post-load-indicator {
+            position: fixed;
+            right: 14px;
+            bottom: 14px;
+            z-index: 100001;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(15, 23, 42, 0.88);
+            color: #f8fafc;
+            backdrop-filter: blur(6px);
+            box-shadow: 0 10px 24px rgba(0,0,0,0.22);
+        }
+        #post-load-indicator-emoji {
+            font-size: 18px;
+            animation: loading-mascot-bob 0.8s ease-in-out infinite;
+        }
+        #post-load-indicator-text {
+            font-size: 12px;
+            color: #e2e8f0;
+            white-space: nowrap;
         }
         #status-text {
             position: absolute;
@@ -1133,10 +1185,16 @@
 <body>
     <!-- 加载遮罩 -->
     <div id="loading-overlay">
+        <div id="loading-mascot-wrap"><div id="loading-mascot">🐱</div></div>
         <div id="loading-text">Loading Star’s pixel office...</div>
+        <div id="loading-subtext">正在先点亮办公室主要区域…</div>
         <div id="loading-progress-container">
             <div id="loading-progress-bar"></div>
         </div>
+    </div>
+    <div id="post-load-indicator" aria-live="polite">
+        <div id="post-load-indicator-emoji">🐾</div>
+        <div id="post-load-indicator-text">房间细节继续整理中… 80%</div>
     </div>
     
     <div id="main-stage">
@@ -1318,7 +1376,9 @@
                 assetHintDefault: '通用素材：建议保持原图尺寸、透明通道与视觉重心一致，避免错位或失真',
                 showCoords: '显示坐标', hideCoords: '隐藏坐标', moveView: '移动视野', lockView: '锁定视野',
                 memoTitle: '昨 日 小 记', guestTitle: '访 客 列 表', officeTitle: 'lut的办公室',
-                loadingOffice: '正在加载 lut 的像素办公室...'
+                loadingOffice: '正在加载 lut 的像素办公室...',
+                loadingBootStage: '正在先点亮办公室主要区域…',
+                loadingDeferredStage: '房间细节继续整理中…'
             },
             en: {
                 controlTitle: 'lut Status',
@@ -1346,7 +1406,9 @@
                 assetHintDefault: 'Generic asset: keep source size, alpha channel, and visual anchor to avoid drift/distortion',
                 showCoords: 'Show Coords', hideCoords: 'Hide Coords', moveView: 'Pan View', lockView: 'Lock View',
                 memoTitle: 'YESTERDAY NOTES', guestTitle: 'VISITOR LIST', officeTitle: 'lut Office',
-                loadingOffice: 'Loading lut’s pixel office...'
+                loadingOffice: 'Loading lut’s pixel office...',
+                loadingBootStage: 'Lighting up the main room first…',
+                loadingDeferredStage: 'Finishing room details in the background…'
             },
             ja: {
                 controlTitle: 'lut ステータス',
@@ -1374,7 +1436,9 @@
                 assetHintDefault: '汎用素材：元サイズ・透過・視覚アンカーを維持し、ズレや崩れを防いでください',
                 showCoords: '座標表示', hideCoords: '座標非表示', moveView: '視点移動', lockView: '視点固定',
                 memoTitle: '昨日のメモ', guestTitle: '訪問者リスト', officeTitle: 'lutのオフィス',
-                loadingOffice: 'lut のピクセルオフィスを読み込み中...'
+                loadingOffice: 'lut のピクセルオフィスを読み込み中...',
+                loadingBootStage: 'まずはオフィスの主要エリアを点灯中…',
+                loadingDeferredStage: '部屋の細部をバックグラウンドで整えています…'
             }
         };
 
@@ -1385,6 +1449,16 @@
             const base = t('loadingOffice');
             const p = Number.isFinite(percent) ? ` ${Math.max(0, Math.min(100, Math.round(percent)))}%` : '';
             loadingEl.textContent = `${base}${p}`;
+        }
+        function renderLoadingStageText(key) {
+            const sub = document.getElementById('loading-subtext');
+            if (sub) sub.textContent = t(key);
+        }
+        function renderPostLoadIndicator(percent) {
+            const el = document.getElementById('post-load-indicator-text');
+            if (!el) return;
+            const p = Math.max(80, Math.min(100, Math.round(percent)));
+            el.textContent = `${t('loadingDeferredStage')} ${p}%`;
         }
 
         function ensureMemoBgVisible() {
@@ -1473,6 +1547,8 @@
             }
             ensureMemoBgVisible();
             renderBootLoadingText(Number(loadingProgressBar?.style?.width?.replace('%','') || 0));
+            renderLoadingStageText(deferredLoadStarted && !deferredLoadFinished ? 'loadingDeferredStage' : 'loadingBootStage');
+            renderPostLoadIndicator(Number(window.__postLoadPercent || 80));
         }
 
         function setUILanguage(lang) {
@@ -1544,7 +1620,13 @@
 
         let totalAssets = 0;
         let loadedAssets = 0;
-        let loadingProgressBar, loadingProgressContainer, loadingOverlay, loadingText;
+        let loadingProgressBar, loadingProgressContainer, loadingOverlay, loadingText, loadingSubtext;
+        const BOOT_PROGRESS_CAP = 80;
+        const DEFERRED_ASSET_TOTAL = 7;
+        let deferredLoadStarted = false;
+        let deferredLoadFinished = false;
+        let deferredAssetsLoaded = 0;
+        let coffeeMachineSprite = null;
 
         // Memo 相关函数
         async function loadMemo() {
@@ -1568,15 +1650,109 @@
         }
 
         // 更新加载进度
-        function updateLoadingProgress() {
-            loadedAssets++;
-            const percent = Math.min(100, Math.round((loadedAssets / totalAssets) * 100));
+        function updateLoadingProgress(percent) {
+            const safePercent = Math.max(0, Math.min(BOOT_PROGRESS_CAP, Math.round(percent)));
             if (loadingProgressBar) {
-                loadingProgressBar.style.width = percent + '%';
+                loadingProgressBar.style.width = safePercent + '%';
             }
             if (loadingText) {
-                renderBootLoadingText(percent);
+                renderBootLoadingText(safePercent);
             }
+            if (loadingSubtext) {
+                renderLoadingStageText('loadingBootStage');
+            }
+            const mascot = document.getElementById('loading-mascot');
+            if (mascot) {
+                mascot.style.transform = `translateX(${safePercent * 2.5}px)`;
+            }
+        }
+
+        function showPostLoadIndicator() {
+            const box = document.getElementById('post-load-indicator');
+            if (!box || deferredLoadFinished) return;
+            box.style.display = 'flex';
+        }
+
+        function hidePostLoadIndicator() {
+            const box = document.getElementById('post-load-indicator');
+            if (!box) return;
+            box.style.display = 'none';
+        }
+
+        function bumpDeferredProgress() {
+            deferredAssetsLoaded++;
+            const percent = BOOT_PROGRESS_CAP + Math.round((Math.min(deferredAssetsLoaded, DEFERRED_ASSET_TOTAL) / DEFERRED_ASSET_TOTAL) * (100 - BOOT_PROGRESS_CAP));
+            window.__postLoadPercent = percent;
+            renderPostLoadIndicator(percent);
+        }
+
+        function queueDeferredAssets(scene) {
+            scene.load.spritesheet('coffee_machine', '/static/coffee-machine-v3-grid.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 230, frameHeight: 230 });
+            scene.load.spritesheet('serverroom', '/static/serverroom-spritesheet.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 180, frameHeight: 251 });
+            scene.load.spritesheet('error_bug', '/static/error-bug-spritesheet-grid.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 220, frameHeight: 220 });
+            scene.load.spritesheet('cats', '/static/cats-spritesheet.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 160, frameHeight: 160 });
+            scene.load.spritesheet('star_working', '/static/star-working-spritesheet-grid.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 300, frameHeight: 300 });
+            scene.load.spritesheet('sync_anim', '/static/sync-animation-v3-grid.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 256, frameHeight: 256 });
+            scene.load.spritesheet('flowers', '/static/flowers-bloom-v2.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: FLOWERS_FRAME_W, frameHeight: FLOWERS_FRAME_H });
+        }
+
+        function createDeferredSceneAssets(scene) {
+            if (!scene || !scene.textures) return;
+            if (scene.textures.exists('cats') && !window.catSprite) {
+                const c = Math.max(1, (scene.textures.get('cats')?.frameTotal || 1) - 1);
+                const f = Math.floor(Math.random() * Math.max(1, c));
+                const cat = scene.add.sprite(94, 557, 'cats', f).setOrigin(0.5);
+                cat.setDepth(2000);
+                cat.setInteractive({ useHandCursor: true });
+                window.catSprite = cat; window.catsFrameCount = c;
+                cat.on('pointerdown', () => { const n = Math.floor(Math.random() * window.catsFrameCount); window.catSprite.setFrame(n); });
+            }
+            if (scene.textures.exists('coffee_machine') && !coffeeMachineSprite) {
+                const m = Math.max(0, (scene.textures.get('coffee_machine')?.frameTotal || 1) - 2);
+                if (scene.anims.exists('coffee_machine')) scene.anims.remove('coffee_machine');
+                scene.anims.create({ key: 'coffee_machine', frames: scene.anims.generateFrameNumbers('coffee_machine', { start: 0, end: m }), frameRate: 12.5, repeat: -1 });
+                coffeeMachineSprite = scene.add.sprite(659, 397, 'coffee_machine').setOrigin(0.5); coffeeMachineSprite.setDepth(99); coffeeMachineSprite.anims.play('coffee_machine', true);
+            }
+            if (scene.textures.exists('serverroom') && !serverroom) {
+                const m = Math.max(0, (scene.textures.get('serverroom')?.frameTotal || 1) - 2);
+                if (scene.anims.exists('serverroom_on')) scene.anims.remove('serverroom_on');
+                scene.anims.create({ key: 'serverroom_on', frames: scene.anims.generateFrameNumbers('serverroom', { start: 0, end: m }), frameRate: 6, repeat: -1 });
+                serverroom = scene.add.sprite(1021, 142, 'serverroom', 0).setOrigin(0.5); serverroom.setDepth(2); serverroom.anims.stop(); serverroom.setFrame(0);
+            }
+            if (scene.textures.exists('flowers') && !window.flowerSprite) {
+                const c = Math.max(1, FLOWERS_FRAME_COLS * FLOWERS_FRAME_ROWS); const f = Math.floor(Math.random() * c);
+                const flower = scene.add.sprite(310, 390, 'flowers', f).setOrigin(0.5); flower.setScale(0.8); flower.setDepth(1100); flower.setInteractive({ useHandCursor: true });
+                window.flowerSprite = flower; window.flowerFrameCount = c; flower.on('pointerdown', () => { const n = Math.floor(Math.random() * window.flowerFrameCount); window.flowerSprite.setFrame(n); });
+            }
+            if (scene.textures.exists('star_working') && !window.starWorking) {
+                if (scene.anims.exists('star_working')) scene.anims.remove('star_working');
+                scene.anims.create({ key: 'star_working', frames: scene.anims.generateFrameNumbers('star_working', { start: 0, end: 37 }), frameRate: 12, repeat: -1 });
+                const starWorking = scene.add.sprite(217, 343, 'star_working', 0).setOrigin(0.5); starWorking.setVisible(false); starWorking.setScale(0.9); starWorking.setDepth(900); window.starWorking = starWorking;
+            }
+            if (scene.textures.exists('error_bug') && !window.errorBug) {
+                if (scene.anims.exists('error_bug')) scene.anims.remove('error_bug');
+                scene.anims.create({ key: 'error_bug', frames: scene.anims.generateFrameNumbers('error_bug', { start: 0, end: 71 }), frameRate: 12, repeat: -1 });
+                const errorBug = scene.add.sprite(1007, 221, 'error_bug', 0).setOrigin(0.5); errorBug.setDepth(50); errorBug.setVisible(false); errorBug.setScale(0.9); errorBug.anims.play('error_bug', true); window.errorBug = errorBug; window.errorBugDir = 1;
+            }
+            if (scene.textures.exists('sync_anim') && !syncAnimSprite) {
+                const t = Number(scene.textures.get('sync_anim')?.frameTotal || 0); const s = 1; const e = Math.max(0, t - 2); syncAnimPlayable = t >= 3 && e >= s;
+                if (scene.anims.exists('sync_anim')) scene.anims.remove('sync_anim');
+                if (syncAnimPlayable) scene.anims.create({ key: 'sync_anim', frames: scene.anims.generateFrameNumbers('sync_anim', { start: s, end: e }), frameRate: 12, repeat: -1 });
+                syncAnimSprite = scene.add.sprite(1157, 592, 'sync_anim', 0).setOrigin(0.5); syncAnimSprite.setDepth(40); syncAnimSprite.anims.stop(); syncAnimSprite.setFrame(0);
+            }
+            applyVisualState(currentState);
+        }
+
+        function startDeferredAssetLoading(scene) {
+            if (!scene || deferredLoadStarted || deferredLoadFinished) return;
+            deferredLoadStarted = true; deferredAssetsLoaded = 0; window.__postLoadPercent = BOOT_PROGRESS_CAP;
+            renderLoadingStageText('loadingDeferredStage'); renderPostLoadIndicator(BOOT_PROGRESS_CAP); showPostLoadIndicator();
+            const advance = () => bumpDeferredProgress();
+            scene.load.on('filecomplete', advance); scene.load.on('loaderror', advance);
+            scene.load.once('complete', () => {
+                scene.load.off('filecomplete', advance); scene.load.off('loaderror', advance); deferredLoadFinished = true; deferredAssetsLoaded = DEFERRED_ASSET_TOTAL; window.__postLoadPercent = 100; renderPostLoadIndicator(100); createDeferredSceneAssets(scene); setTimeout(() => hidePostLoadIndicator(), 900);
+            });
+            queueDeferredAssets(scene); scene.load.start();
         }
 
         // 隐藏加载界面
@@ -1607,6 +1783,7 @@
         setTimeout(() => {
             if (loadingOverlay && loadingOverlay.style.display !== 'none') {
                 hideLoadingOverlay();
+                showPostLoadIndicator();
             }
         }, 8000);
         
@@ -3955,68 +4132,27 @@ function toggleBrokerPanel() {
         }
 
         function preload() {
-            // 获取加载界面元素
             loadingOverlay = document.getElementById('loading-overlay');
             loadingProgressBar = document.getElementById('loading-progress-bar');
             loadingText = document.getElementById('loading-text');
+            loadingSubtext = document.getElementById('loading-subtext');
             loadingProgressContainer = document.getElementById('loading-progress-container');
-            
-            // 设置资源总数（全部首屏加载：装饰也第一时间出现）
-            totalAssets = 15;
+            totalAssets = 14;
             loadedAssets = 0;
-            
-            // 加载进度监听
-            this.load.on('filecomplete', () => {
-                updateLoadingProgress();
-            });
-            
-            this.load.on('complete', () => {
-                hideLoadingOverlay();
-            });
-
-            // cache-busting to avoid stale background on client/CDN
-            // use smaller/new map version provided by user
+            updateLoadingProgress(0);
+            renderLoadingStageText('loadingBootStage');
+            this.load.on('progress', (value) => { updateLoadingProgress(value * BOOT_PROGRESS_CAP); });
+            this.load.on('complete', () => { updateLoadingProgress(BOOT_PROGRESS_CAP); renderLoadingStageText('loadingDeferredStage'); });
             this.load.image('office_bg', '/static/office_bg_small.webp?v={{VERSION_TIMESTAMP}}');
             this.load.spritesheet('star_idle', '/static/star-idle-v5.png?v={{VERSION_TIMESTAMP}}', { frameWidth: 256, frameHeight: 256 });
-
-            // Furniture
             this.load.image('sofa_idle', '/static/sofa-idle-v3.png?v={{VERSION_TIMESTAMP}}');
             this.load.image('sofa_shadow', '/static/sofa-shadow-v1.png?v={{VERSION_TIMESTAMP}}');
-
-            // Decor
+            this.load.image('coffee_machine_shadow', '/static/coffee-machine-shadow-v1.png?v={{VERSION_TIMESTAMP}}');
             this.load.spritesheet('plants', '/static/plants-spritesheet.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 160, frameHeight: 160 });
             this.load.spritesheet('posters', '/static/posters-spritesheet.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 160, frameHeight: 160 });
-            this.load.spritesheet('coffee_machine', '/static/coffee-machine-v3-grid.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 230, frameHeight: 230 });
-            this.load.image('coffee_machine_shadow', '/static/coffee-machine-shadow-v1.png?v={{VERSION_TIMESTAMP}}');
-            this.load.spritesheet('serverroom', '/static/serverroom-spritesheet.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 180, frameHeight: 251 });
-
-            // Error / bug animation: 180x180, 96 frames (repacked grid)
-            this.load.spritesheet('error_bug', '/static/error-bug-spritesheet-grid.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 220, frameHeight: 220 });
-
-            // 运行时 Gemini 配置（用于搬家/中介生图）
             this.geminiConfig = { hasKey: false, model: 'gemini-3.1-flash-image-preview' };
-
-            // Cat spritesheet: 160x160, 4x4=16 cats
-            this.load.spritesheet('cats', '/static/cats-spritesheet.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 160, frameHeight: 160 });
-
-            // Desk
-            // Star working animation: repacked to grid to avoid WebGL max texture size limits
-            // NOTE: prefer WebP for size, PNG fallback
-            // 动态替换后按最新素材识别：当前 writing 素材为 300x300 单帧
-            this.load.spritesheet('star_working', '/static/star-working-spritesheet-grid.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 300, frameHeight: 300 });
-
-            // Sync state animation (256x256, 多帧): 非同步显示首帧，同步从第2帧循环
-            this.load.spritesheet('sync_anim', '/static/sync-animation-v3-grid.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 256, frameHeight: 256 });
-
-            // Memo background image
-            // memo 底图固定走 png，避免某些端 webp 透明通道异常导致“底图丢失”
             this.load.image('memo_bg', '/static/memo-bg.webp?v={{VERSION_TIMESTAMP}}');
-            // Desk v2 (webp only)
             this.load.image('desk_v2', '/static/desk-v3.webp?v={{VERSION_TIMESTAMP}}');
-            // Flower spritesheet (65x65, 16 frames)
-            this.load.spritesheet('flowers', '/static/flowers-bloom-v2.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: FLOWERS_FRAME_W, frameHeight: FLOWERS_FRAME_H });
-
-            // Guest/Demo agent sprites
             this.load.spritesheet('guest_anim_1', '/static/guest_anim_1.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 32, frameHeight: 32 });
             this.load.spritesheet('guest_anim_2', '/static/guest_anim_2.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 32, frameHeight: 32 });
             this.load.spritesheet('guest_anim_3', '/static/guest_anim_3.webp?v={{VERSION_TIMESTAMP}}', { frameWidth: 32, frameHeight: 32 });
@@ -4157,123 +4293,12 @@ function toggleBrokerPanel() {
                 window.posterSprite.setFrame(next);
             });
 
-            // Random cat at (94,557)
-            const catsFrameCount = (this.textures.get('cats')?.frameTotal || 1) - 1;
-            const randomCatFrame = Math.floor(Math.random() * Math.max(1, catsFrameCount));
-            const cat = game.add.sprite(94, 557, 'cats', randomCatFrame).setOrigin(0.5);
-            cat.setDepth(2000); // top layer
-            cat.setInteractive({ useHandCursor: true });
-            // Expose to global for click handler
-            window.catSprite = cat;
-            window.catsFrameCount = catsFrameCount;
-            cat.on('pointerdown', () => {
-                const next = Math.floor(Math.random() * window.catsFrameCount);
-                window.catSprite.setFrame(next);
-            });
-
-            // Coffee machine at (659,397) - animated sprite + shadow
-            const coffeeMachineShadow = this.add.image(659, 397, 'coffee_machine_shadow').setOrigin(0.5);
-            coffeeMachineShadow.setDepth(98);
-            const coffeeFrameMax = Math.max(0, (this.textures.get('coffee_machine')?.frameTotal || 1) - 2);
-            if (this.anims.exists('coffee_machine')) {
-                this.anims.remove('coffee_machine');
-            }
-            this.anims.create({
-                key: 'coffee_machine',
-                frames: this.anims.generateFrameNumbers('coffee_machine', { start: 0, end: coffeeFrameMax }),
-                frameRate: 12.5,
-                repeat: -1
-            });
-            const coffeeMachine = this.add.sprite(659, 397, 'coffee_machine').setOrigin(0.5);
-            coffeeMachine.setDepth(99);
-            coffeeMachine.anims.play('coffee_machine', true);
-
-            // Server room animation
-            const serverFrameMax = Math.max(0, (this.textures.get('serverroom')?.frameTotal || 1) - 2);
-            this.anims.create({
-                key: 'serverroom_on',
-                frames: this.anims.generateFrameNumbers('serverroom', { start: 0, end: serverFrameMax }),
-                frameRate: 6,
-                repeat: -1
-            });
-            serverroom = this.add.sprite(1021, 142, 'serverroom', 0).setOrigin(0.5);
-            serverroom.setDepth(2);
-            // 默认 idle: 静止第0帧
-            serverroom.anims.stop();
-            serverroom.setFrame(0);
-
             // Desk at (218,417) (v2)
             const desk = this.add.image(218, 417, 'desk_v2').setOrigin(0.5);
             desk.setDepth(1001);  // desk above starWorking
 
-            // Random flower pot at (310,390), default scale 0.8 (top layer)
-            const flowerFrameCount = Math.max(1, FLOWERS_FRAME_COLS * FLOWERS_FRAME_ROWS); // 动态帧数
-            const randomFlowerFrame = Math.floor(Math.random() * flowerFrameCount);
-            const flower = this.add.sprite(310, 390, 'flowers', randomFlowerFrame).setOrigin(0.5);
-            flower.setScale(0.8);
-            flower.setDepth(1100); // highest among desk/starWorking
-            flower.setInteractive({ useHandCursor: true });
-            window.flowerSprite = flower;
-            window.flowerFrameCount = flowerFrameCount;
-            flower.on('pointerdown', () => {
-                const next = Math.floor(Math.random() * window.flowerFrameCount);
-                window.flowerSprite.setFrame(next);
-            });
-
-            // Star working at desk (217,333)
-            this.anims.create({
-                key: 'star_working',
-                // 38 帧（0~37），避免沿用旧 192 帧导致疯狂闪烁
-                frames: this.anims.generateFrameNumbers('star_working', { start: 0, end: 37 }),
-                frameRate: 12,
-                repeat: -1
-            });
-
-            // Error / bug animation (96 frames)
-            this.anims.create({
-                key: 'error_bug',
-                frames: this.anims.generateFrameNumbers('error_bug', { start: 0, end: 71 }),
-                frameRate: 12,
-                repeat: -1
-            });
-
-            // Error bug character (moves between two points when state=error)
-            const errorBug = this.add.sprite(1007, 221, 'error_bug', 0).setOrigin(0.5);
-            errorBug.setDepth(50); // above serverroom, below desk/bubbles
-            errorBug.setVisible(false);
-            errorBug.setScale(0.9); // shrink 10%
-            errorBug.anims.play('error_bug', true);
-            window.errorBug = errorBug;
-            window.errorBugDir = 1; // 1 -> to right, -1 -> to left
-            const starWorking = this.add.sprite(217, 343, 'star_working', 0).setOrigin(0.5);
-            starWorking.setVisible(false);
-            starWorking.setScale(0.9);
-            starWorking.setDepth(900);  // starWorking under desk so desk partially covers it
-            // Store reference to starWorking for state logic
-            window.starWorking = starWorking;
-
-            // Sync animation sprite at (1157,592)
-            const syncFrameTotal = Number(this.textures.get('sync_anim')?.frameTotal || 0);
-            const syncFrameStart = 1;
-            const syncFrameEnd = Math.max(0, syncFrameTotal - 2);
-            // 仅在确实存在可播放帧（>=1）时才创建同步动画，避免单帧素材触发播放异常
-            syncAnimPlayable = syncFrameTotal >= 3 && syncFrameEnd >= syncFrameStart;
-            if (this.anims.exists('sync_anim')) {
-                this.anims.remove('sync_anim');
-            }
-            if (syncAnimPlayable) {
-            this.anims.create({
-                key: 'sync_anim',
-                    frames: this.anims.generateFrameNumbers('sync_anim', { start: syncFrameStart, end: syncFrameEnd }),
-                frameRate: 12,
-                repeat: -1
-            });
-            }
-            syncAnimSprite = this.add.sprite(1157, 592, 'sync_anim', 0).setOrigin(0.5);
-            syncAnimSprite.setDepth(40);
-            // default show first frame only
-            syncAnimSprite.anims.stop();
-            syncAnimSprite.setFrame(0);
+            // 次要重资源：花朵、工作态、报错虫、同步动画、服务器区、咖啡机、小猫
+            // 改为主页可见后再后台补载
 
             // Debug: expose star sprite too (for path calibration / visuals)
             window.starSprite = star;
@@ -4478,6 +4503,11 @@ function toggleBrokerPanel() {
 
             fetchStatus();
             fetchGuestAgents();
+            startDeferredAssetLoading(this);
+            setTimeout(() => {
+                hideLoadingOverlay();
+                showPostLoadIndicator();
+            }, 120);
         }
 
         function update(time) {
