@@ -40,6 +40,8 @@ PUSH_INTERVAL_SECONDS = 15  # 每隔多少秒推送一次（更实时）
 STATUS_ENDPOINT = "/status"
 JOIN_ENDPOINT = "/join-agent"
 PUSH_ENDPOINT = "/agent-push"
+MAIN_PUSH_ENDPOINT = "/main-agent-push"
+SYNC_MAIN = os.environ.get("OFFICE_SYNC_MAIN", "0") in {"1", "true", "TRUE", "yes", "YES"}
 
 # 自动状态守护：当本地状态文件不存在或长期不更新时，自动回 idle，避免“假工作中”
 STALE_STATE_TTL_SECONDS = int(os.environ.get("OFFICE_STALE_STATE_TTL", "600"))
@@ -242,6 +244,23 @@ def do_join(local):
 
 def do_push(local, status_data):
     import requests
+    if SYNC_MAIN:
+        main_payload = {
+            "state": status_data.get("state", "idle"),
+            "detail": status_data.get("detail", ""),
+            "name": local.get("agentName", AGENT_NAME),
+        }
+        r_main = requests.post(f"{OFFICE_URL}{MAIN_PUSH_ENDPOINT}", json=main_payload, timeout=10)
+        if r_main.status_code not in (200, 201):
+            log(f"WARN main push failed: {r_main.text}")
+        else:
+            try:
+                main_data = r_main.json()
+                if main_data.get("ok"):
+                    log(f"OK synced main anchor, area={main_data.get('area', 'breakroom')}")
+            except Exception:
+                pass
+
     payload = {
         "agentId": local.get("agentId"),
         "joinKey": local.get("joinKey", JOIN_KEY),
@@ -304,6 +323,8 @@ def main():
     # 持续推送
     log(f"Bridge loop started, interval={PUSH_INTERVAL_SECONDS}s")
     log("State mapping: active->workspace; idle/done->breakroom; error->bug area")
+    if SYNC_MAIN:
+        log("Main anchor projection: enabled")
     log("If local /status returns 401, set OFFICE_LOCAL_STATUS_TOKEN or OFFICE_LOCAL_STATUS_URL")
     try:
         while True:

@@ -79,6 +79,9 @@ STATE_TO_AREA_MAP = {
     "syncing": "writing",
     "error": "error",
 }
+MAIN_AGENT_ID = "main-anchor"
+MAIN_AGENT_SOURCE = "main-projection"
+MAIN_AGENT_DEFAULT_NAME = "lut"
 
 
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="/static")
@@ -223,6 +226,65 @@ def save_state(state: dict):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
+def sync_main_agent_projection(*, state=None, detail=None, updated_at=None, progress=None, agent_name=None):
+    """Project the main local state into the public main agent card."""
+    agents = load_agents_state()
+    main_agent = next((a for a in agents if a.get("isMain")), None)
+    if main_agent is None:
+        main_agent = dict(DEFAULT_AGENTS[0])
+        agents.insert(0, main_agent)
+
+    current_state = normalize_agent_state(state or main_agent.get("state") or load_state().get("state", "idle"))
+    current_detail = detail if detail is not None else main_agent.get("detail")
+    if current_detail is None:
+        current_detail = load_state().get("detail", "")
+    current_updated_at = updated_at or datetime.now().isoformat()
+    office_name = get_office_name_from_identity()
+    fallback_name = MAIN_AGENT_DEFAULT_NAME
+    if office_name and office_name.endswith("的办公室"):
+        fallback_name = office_name[:-4] or fallback_name
+
+    main_agent["agentId"] = MAIN_AGENT_ID
+    main_agent["isMain"] = True
+    main_agent["name"] = (agent_name or main_agent.get("name") or fallback_name).strip() or fallback_name
+    main_agent["state"] = current_state
+    main_agent["detail"] = current_detail or ""
+    main_agent["updated_at"] = current_updated_at
+    main_agent["area"] = state_to_area(current_state)
+    main_agent["source"] = MAIN_AGENT_SOURCE
+    main_agent["lastPushAt"] = current_updated_at
+    if progress is not None:
+        main_agent["progress"] = progress
+
+    save_agents_state(agents)
+    return main_agent
+
+
+def set_main_state(data: dict, *, agent_name=None):
+    state = load_state()
+    if "state" in data:
+        s = data["state"]
+        if s in VALID_AGENT_STATES:
+            state["state"] = s
+    if "detail" in data:
+        state["detail"] = data["detail"]
+    if "progress" in data:
+        try:
+            state["progress"] = int(data["progress"])
+        except Exception:
+            pass
+    state["updated_at"] = datetime.now().isoformat()
+    save_state(state)
+    sync_main_agent_projection(
+        state=state.get("state"),
+        detail=state.get("detail"),
+        updated_at=state.get("updated_at"),
+        progress=state.get("progress"),
+        agent_name=agent_name,
+    )
+    return state
+
+
 def ensure_electron_standalone_snapshot():
     """Create Electron standalone frontend snapshot once if missing.
 
@@ -306,14 +368,14 @@ def invite_page():
 
 DEFAULT_AGENTS = [
     {
-        "agentId": "star",
-        "name": "Star",
+        "agentId": MAIN_AGENT_ID,
+        "name": MAIN_AGENT_DEFAULT_NAME,
         "isMain": True,
         "state": "idle",
         "detail": "待命中，随时准备为你服务",
         "updated_at": datetime.now().isoformat(),
         "area": "breakroom",
-        "source": "local",
+        "source": MAIN_AGENT_SOURCE,
         "joinKey": None,
         "authStatus": "approved",
         "authExpiresAt": None,
@@ -323,7 +385,20 @@ DEFAULT_AGENTS = [
 
 
 def load_agents_state():
-    return _store_load_agents_state(AGENTS_STATE_FILE, DEFAULT_AGENTS)
+    agents = _store_load_agents_state(AGENTS_STATE_FILE, DEFAULT_AGENTS)
+    main_agent = next((a for a in agents if a.get("isMain")), None)
+    if main_agent is None:
+        agents.insert(0, dict(DEFAULT_AGENTS[0]))
+        main_agent = agents[0]
+    office_name = get_office_name_from_identity()
+    fallback_name = MAIN_AGENT_DEFAULT_NAME
+    if office_name and office_name.endswith("的办公室"):
+        fallback_name = office_name[:-4] or fallback_name
+    main_agent["agentId"] = MAIN_AGENT_ID
+    main_agent["name"] = fallback_name
+    main_agent["source"] = MAIN_AGENT_SOURCE
+    main_agent["isMain"] = True
+    return agents
 
 
 def save_agents_state(agents):
@@ -842,6 +917,13 @@ def get_agents():
     Security note: this endpoint must not expose join keys or internal auth metadata,
     otherwise a viewer could reuse a join key to impersonate or add remote agents.
     """
+    state = load_state()
+    sync_main_agent_projection(
+        state=state.get("state"),
+        detail=state.get("detail"),
+        updated_at=state.get("updated_at"),
+        progress=state.get("progress"),
+    )
     agents = load_agents_state()
     now = datetime.now()
 
@@ -1164,10 +1246,29 @@ def leave_agent():
 def get_status():
     """Get current main state (backward compatibility). Optionally include officeName from IDENTITY.md."""
     state = load_state()
-    office_name = get_office_name_from_identity()
+    office_name = get_office_name_from_identity() or f"{MAIN_AGENT_DEFAULT_NAME}的办公室"
     if office_name:
         state["officeName"] = office_name
+    sync_main_agent_projection(
+        state=state.get("state"),
+        detail=state.get("detail"),
+        updated_at=state.get("updated_at"),
+        progress=state.get("progress"),
+    )
     return jsonify(state)
+
+
+@app.route("/main-agent-push", methods=["POST"])
+def main_agent_push():
+    """Project local real work state onto the public main agent."""
+    try:
+        data = request.get_json()
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "msg": "invalid json"}), 400
+        state = set_main_state(data, agent_name=(data.get("name") or "").strip() or None)
+        return jsonify({"ok": True, "state": state.get("state"), "area": state_to_area(state.get("state", "idle"))})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
 
 
 @app.route("/agent-push", methods=["POST"])
@@ -1311,15 +1412,7 @@ def set_state_endpoint():
         data = request.get_json()
         if not isinstance(data, dict):
             return jsonify({"status": "error", "msg": "invalid json"}), 400
-        state = load_state()
-        if "state" in data:
-            s = data["state"]
-            if s in VALID_AGENT_STATES:
-                state["state"] = s
-        if "detail" in data:
-            state["detail"] = data["detail"]
-        state["updated_at"] = datetime.now().isoformat()
-        save_state(state)
+        set_main_state(data)
         return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"status": "error", "msg": str(e)}), 500
