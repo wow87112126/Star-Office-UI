@@ -40,6 +40,7 @@ PUSH_INTERVAL_SECONDS = 15  # 每隔多少秒推送一次（更实时）
 STATUS_ENDPOINT = "/status"
 JOIN_ENDPOINT = "/join-agent"
 PUSH_ENDPOINT = "/agent-push"
+LEAVE_ENDPOINT = "/leave-agent"
 MAIN_PUSH_ENDPOINT = "/main-agent-push"
 SYNC_MAIN = os.environ.get("OFFICE_SYNC_MAIN", "0") in {"1", "true", "TRUE", "yes", "YES"}
 
@@ -242,6 +243,36 @@ def do_join(local):
     return False
 
 
+def do_leave(local):
+    import requests
+    agent_id = (local.get("agentId") or "").strip()
+    if not agent_id:
+        local["joined"] = False
+        local["agentId"] = None
+        save_local_state(local)
+        return True
+
+    payload = {
+        "agentId": agent_id,
+        "name": local.get("agentName", AGENT_NAME),
+    }
+    r = requests.post(f"{OFFICE_URL}{LEAVE_ENDPOINT}", json=payload, timeout=10)
+    if r.status_code in (200, 201):
+        try:
+            data = r.json()
+            if data.get("ok"):
+                log(f"OK left office, agentId={agent_id}")
+        except Exception:
+            pass
+        local["joined"] = False
+        local["agentId"] = None
+        save_local_state(local)
+        return True
+
+    log(f"WARN leave failed: {r.text}")
+    return False
+
+
 def do_push(local, status_data):
     import requests
     if SYNC_MAIN:
@@ -253,13 +284,15 @@ def do_push(local, status_data):
         r_main = requests.post(f"{OFFICE_URL}{MAIN_PUSH_ENDPOINT}", json=main_payload, timeout=10)
         if r_main.status_code not in (200, 201):
             log(f"WARN main push failed: {r_main.text}")
-        else:
-            try:
-                main_data = r_main.json()
-                if main_data.get("ok"):
-                    log(f"OK synced main anchor, area={main_data.get('area', 'breakroom')}")
-            except Exception:
-                pass
+            return False
+        try:
+            main_data = r_main.json()
+            if main_data.get("ok"):
+                log(f"OK synced main anchor, area={main_data.get('area', 'breakroom')}")
+                return True
+        except Exception:
+            pass
+        return True
 
     payload = {
         "agentId": local.get("agentId"),
@@ -314,17 +347,25 @@ def main():
         log("  Option B (recommended): set OFFICE_JOIN_KEY / OFFICE_AGENT_NAME / OFFICE_URL")
         sys.exit(1)
 
-    # 如果之前没 join，先 join
-    if not local.get("joined") or not local.get("agentId"):
-        ok = do_join(local)
-        if not ok:
-            sys.exit(1)
+    # 主锚点投影模式：只同步 main anchor，不再额外挂一个 joined 访客
+    if SYNC_MAIN:
+        if local.get("joined") or local.get("agentId"):
+            do_leave(local)
+        local["joined"] = False
+        local["agentId"] = None
+        save_local_state(local)
+    else:
+        # 如果之前没 join，先 join
+        if not local.get("joined") or not local.get("agentId"):
+            ok = do_join(local)
+            if not ok:
+                sys.exit(1)
 
     # 持续推送
     log(f"Bridge loop started, interval={PUSH_INTERVAL_SECONDS}s")
     log("State mapping: active->workspace; idle/done->breakroom; error->bug area")
     if SYNC_MAIN:
-        log("Main anchor projection: enabled")
+        log("Main anchor projection: enabled (main-only mode, no joined guest)")
     log("If local /status returns 401, set OFFICE_LOCAL_STATUS_TOKEN or OFFICE_LOCAL_STATUS_URL")
     try:
         while True:
