@@ -15,10 +15,25 @@ import time
 import sys
 from datetime import datetime
 
+
+def log(msg):
+    """Best-effort logging that won't crash on Windows console encodings."""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        safe = str(msg).encode("ascii", errors="ignore").decode("ascii", errors="ignore")
+        print(safe)
+
 # === 你需要填入的信息 ===
-JOIN_KEY = ""   # 必填：你的一次性 join key
-AGENT_NAME = "" # 必填：你在办公室里的名字
-OFFICE_URL = "https://office.hyacinth.im"  # 海辛办公室地址（一般不用改）
+# 现在支持两种方式：
+# 1) 直接改下面常量
+# 2) 用环境变量覆盖（推荐，方便本地常驻/半自动化）
+#    - OFFICE_JOIN_KEY
+#    - OFFICE_AGENT_NAME
+#    - OFFICE_URL
+JOIN_KEY = os.environ.get("OFFICE_JOIN_KEY", "").strip()   # 必填：你的一次性 join key
+AGENT_NAME = os.environ.get("OFFICE_AGENT_NAME", "").strip() # 必填：你在办公室里的名字
+OFFICE_URL = os.environ.get("OFFICE_URL", "https://office.hyacinth.im").strip().rstrip("/")  # 海辛办公室地址（一般不用改）
 
 # === 推送配置 ===
 PUSH_INTERVAL_SECONDS = 15  # 每隔多少秒推送一次（更实时）
@@ -166,7 +181,7 @@ def fetch_local_status():
                         detail = f"本地状态超过{STALE_STATE_TTL_SECONDS}s未更新，自动回待命"
 
                     if VERBOSE:
-                        print(f"[status-source:file] path={fp} state={state} detail={detail[:60]}")
+                        log(f"[status-source:file] path={fp} state={state} detail={detail[:60]}")
                     return {"state": state, "detail": detail}
         except Exception:
             pass
@@ -190,7 +205,7 @@ def fetch_local_status():
                 detail = f"本地/status 超过{STALE_STATE_TTL_SECONDS}s未更新，自动回待命"
 
             if VERBOSE:
-                print(f"[status-source:http] url={LOCAL_STATUS_URL} state={state} detail={detail[:60]}")
+                log(f"[status-source:http] url={LOCAL_STATUS_URL} state={state} detail={detail[:60]}")
             return {"state": state, "detail": detail}
         # 如果 401，说明需要 token
         if r.status_code == 401:
@@ -200,7 +215,7 @@ def fetch_local_status():
 
     # 3) 默认 fallback
     if VERBOSE:
-        print("[status-source:fallback] state=idle detail=待命中")
+        log("[status-source:fallback] state=idle detail=待命中")
     return {"state": "idle", "detail": "待命中"}
 
 
@@ -219,9 +234,9 @@ def do_join(local):
             local["joined"] = True
             local["agentId"] = data.get("agentId")
             save_local_state(local)
-            print(f"✅ 已加入海辛办公室，agentId={local['agentId']}")
+            log(f"OK joined office, agentId={local['agentId']}")
             return True
-    print(f"❌ 加入失败：{r.text}")
+    log(f"JOIN failed: {r.text}")
     return False
 
 
@@ -239,7 +254,7 @@ def do_push(local, status_data):
         data = r.json()
         if data.get("ok"):
             area = data.get("area", "breakroom")
-            print(f"✅ 状态已同步，当前区域={area}")
+            log(f"OK pushed status, area={area}")
             return True
 
     # 403/404：拒绝/移除 → 停止推送
@@ -249,13 +264,13 @@ def do_push(local, status_data):
             msg = (r.json() or {}).get("msg", "")
         except Exception:
             msg = r.text
-        print(f"⚠️  访问拒绝或已移出房间（{r.status_code}），停止推送：{msg}")
+        log(f"WARN rejected/removed ({r.status_code}), stop pushing: {msg}")
         local["joined"] = False
         local["agentId"] = None
         save_local_state(local)
         sys.exit(1)
 
-    print(f"⚠️  推送失败：{r.text}")
+    log(f"WARN push failed: {r.text}")
     return False
 
 
@@ -264,18 +279,20 @@ def main():
 
     # Startup hint for state source and URL (helps with port/state issues, e.g. issue #31)
     if LOCAL_STATE_FILE:
-        print(f"State file: {LOCAL_STATE_FILE}")
+        log(f"State file: {LOCAL_STATE_FILE}")
     else:
         first_existing = next((p for p in DEFAULT_STATE_CANDIDATES if p and os.path.exists(p)), None)
         if first_existing:
-            print(f"State file (auto): {first_existing}")
+            log(f"State file (auto): {first_existing}")
         else:
-            print("State file: auto-discover (set OFFICE_LOCAL_STATE_FILE if state not found)")
-    print(f"Local status URL: {LOCAL_STATUS_URL} (set OFFICE_LOCAL_STATUS_URL if backend uses another port)")
+            log("State file: auto-discover (set OFFICE_LOCAL_STATE_FILE if state not found)")
+    log(f"Local status URL: {LOCAL_STATUS_URL} (set OFFICE_LOCAL_STATUS_URL if backend uses another port)")
 
     # 先确认配置是否齐全
     if not JOIN_KEY or not AGENT_NAME:
-        print("❌ 请先在脚本开头填入 JOIN_KEY 和 AGENT_NAME")
+        log("Please configure JOIN_KEY and AGENT_NAME first")
+        log("  Option A: edit script constants")
+        log("  Option B (recommended): set OFFICE_JOIN_KEY / OFFICE_AGENT_NAME / OFFICE_URL")
         sys.exit(1)
 
     # 如果之前没 join，先 join
@@ -285,19 +302,19 @@ def main():
             sys.exit(1)
 
     # 持续推送
-    print(f"🚀 开始持续推送状态，间隔={PUSH_INTERVAL_SECONDS}秒")
-    print("🧭 状态逻辑：任务中→工作区；待命/完成→休息区；异常→bug区")
-    print("🔐 若本地 /status 返回 Unauthorized(401)，请设置环境变量：OFFICE_LOCAL_STATUS_TOKEN 或 OFFICE_LOCAL_STATUS_URL")
+    log(f"Bridge loop started, interval={PUSH_INTERVAL_SECONDS}s")
+    log("State mapping: active->workspace; idle/done->breakroom; error->bug area")
+    log("If local /status returns 401, set OFFICE_LOCAL_STATUS_TOKEN or OFFICE_LOCAL_STATUS_URL")
     try:
         while True:
             try:
                 status_data = fetch_local_status()
                 do_push(local, status_data)
             except Exception as e:
-                print(f"⚠️  推送异常：{e}")
+                log(f"WARN push exception: {e}")
             time.sleep(PUSH_INTERVAL_SECONDS)
     except KeyboardInterrupt:
-        print("\n👋 停止推送")
+        log("Bridge stopped")
         sys.exit(0)
 
 

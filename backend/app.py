@@ -837,7 +837,11 @@ if os.path.exists(RUNTIME_CONFIG_FILE):
 
 @app.route("/agents", methods=["GET"])
 def get_agents():
-    """Get full agents list (for multi-agent UI), with auto-cleanup on access"""
+    """Get public agents list for multi-agent UI.
+
+    Security note: this endpoint must not expose join keys or internal auth metadata,
+    otherwise a viewer could reuse a join key to impersonate or add remote agents.
+    """
     agents = load_agents_state()
     now = datetime.now()
 
@@ -885,7 +889,20 @@ def get_agents():
     save_agents_state(cleaned_agents)
     save_join_keys(keys_data)
 
-    return jsonify(cleaned_agents)
+    public_agents = []
+    for a in cleaned_agents:
+        public_agent = dict(a)
+        for secret_key in [
+            "joinKey",
+            "authApprovedAt",
+            "authRejectedAt",
+            "authExpiresAt",
+            "usedByAgentId",
+        ]:
+            public_agent.pop(secret_key, None)
+        public_agents.append(public_agent)
+
+    return jsonify(public_agents)
 
 
 @app.route("/agent-approve", methods=["POST"])
