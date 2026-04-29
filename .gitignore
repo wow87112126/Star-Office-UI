@@ -30,6 +30,9 @@ backend.log
 scripts/start-office-bridge.ps1
 *.pem
 
+# Local deploy records
+docs/deploy-records/
+
 # Generated / mutable assets (local only)
 assets/bg-history/
 assets/home-favorites/

@@ -38,6 +38,11 @@ DEFAULT_INCLUDE = [
     "office-agent-push.py",
     "set_state.py",
     "scripts/smoke_test.py",
+    "scripts/deploy_to_server.py",
+    "docs/DEPLOY-SOP.md",
+    "docs/HERMES-OPENCLAW-CONTEXT-BRIDGE.md",
+    "docs/RELEASE-CHECKLIST.md",
+    "docs/DEPLOY-RECORD.template.md",
     "healthcheck.sh",
 ]
 
