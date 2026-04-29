@@ -7,6 +7,7 @@ Flow:
 3. Upload selected files/dirs from local workspace to remote project dir
 4. Restart star-office service
 5. Run remote health check
+6. Optionally write a local deploy record template for Hermes/OpenClaw review
 
 Designed to keep "code deploy" separate from "state bridge".
 """
@@ -29,6 +30,7 @@ DEFAULT_REMOTE_SERVICE = os.environ.get("STAR_OFFICE_REMOTE_SERVICE", "star-offi
 DEFAULT_BASE_URL = os.environ.get("STAR_OFFICE_BASE_URL", "http://127.0.0.1:19000")
 DEFAULT_HEALTH_URL = os.environ.get("STAR_OFFICE_HEALTH_URL", "http://127.0.0.1:19000/health")
 DEFAULT_IDENTITY_FILE = os.environ.get("STAR_OFFICE_IDENTITY_FILE", "")
+DEFAULT_RECORD_DIR = ROOT / "docs" / "deploy-records"
 
 DEFAULT_INCLUDE = [
     "backend",
@@ -48,6 +50,10 @@ def run(cmd: list[str], *, cwd: Path | None = None, check: bool = True) -> int:
     return proc.returncode
 
 
+def capture(cmd: list[str], *, cwd: Path | None = None) -> str:
+    return subprocess.check_output(cmd, cwd=str(cwd) if cwd else None, text=True).strip()
+
+
 def ssh_target(user: str, host: str) -> str:
     return f"{user}@{host}"
 
@@ -62,6 +68,11 @@ def remote_path_join(base: str, rel: str) -> str:
     return posixpath.join(base.rstrip("/"), rel.replace("\\", "/"))
 
 
+def default_record_file() -> Path:
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return DEFAULT_RECORD_DIR / f"deploy-{stamp}.md"
+
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default=DEFAULT_REMOTE_HOST)
@@ -73,6 +84,10 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--identity-file", default=DEFAULT_IDENTITY_FILE)
     ap.add_argument("--skip-smoke", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--scope", default="")
+    ap.add_argument("--previous-commit", default="")
+    ap.add_argument("--deploy-commit", default="")
+    ap.add_argument("--record-file", default=str(default_record_file()))
     ap.add_argument(
         "--include",
         nargs="*",
@@ -85,6 +100,12 @@ def parse_args() -> argparse.Namespace:
 def local_smoke(base_url: str) -> None:
     smoke = ROOT / "scripts" / "smoke_test.py"
     run([sys.executable, str(smoke), "--base-url", base_url], cwd=ROOT)
+
+
+def resolve_deploy_commit(explicit: str) -> str:
+    if explicit:
+        return explicit
+    return capture(["git", "rev-parse", "HEAD"], cwd=ROOT)
 
 
 def remote_backup(target: str, remote_dir: str, identity_file: str, dry_run: bool) -> str:
@@ -130,14 +151,31 @@ def remote_restart_and_check(target: str, service: str, health_url: str, identit
         run(health_cmd)
 
 
+def write_deploy_record(record_file: Path, *, target: str, remote_dir: str, service: str, deploy_commit: str, previous_commit: str, scope: str, include: list[str], backup: str, dry_run: bool) -> None:
+    record_file.parent.mkdir(parents=True, exist_ok=True)
+    content = f"""# Deploy Record\n\n- timestamp: {dt.datetime.now().isoformat()}\n- operator: OpenClaw\n- reviewer: Hermes\n- environment: production\n- target: {target}\n- remote_dir: {remote_dir}\n- service: {service}\n- dry_run: {str(dry_run).lower()}\n- deploy_commit: {deploy_commit}\n- previous_known_good_commit: {previous_commit}\n- scope: {scope}\n- changed_paths:\n"""
+    for item in include:
+        content += f"  - {item}\n"
+    content += f"""- backup_archive: {backup}\n- health_check: {'pending (dry-run)' if dry_run else 'completed by helper'}\n- rollback_target: {previous_commit}\n- notes: \n"""
+    record_file.write_text(content, encoding="utf-8")
+    print(f"[info] wrote deploy record: {record_file}")
+
+
 def main() -> int:
     args = parse_args()
     target = ssh_target(args.user, args.host)
+    deploy_commit = resolve_deploy_commit(args.deploy_commit)
+    record_file = Path(args.record_file)
 
     print("== Star Office deploy helper ==")
     print(f"project root : {ROOT}")
     print(f"remote target: {target}:{args.remote_dir}")
     print(f"service      : {args.service}")
+    print(f"deploy commit: {deploy_commit}")
+    if args.previous_commit:
+        print(f"previous good: {args.previous_commit}")
+    if args.scope:
+        print(f"scope        : {args.scope}")
 
     if not args.skip_smoke:
         local_smoke(args.base_url)
@@ -146,6 +184,18 @@ def main() -> int:
     print(f"backup archive: {backup}")
     upload_paths(target, args.remote_dir, args.include, args.identity_file, args.dry_run)
     remote_restart_and_check(target, args.service, args.health_url, args.identity_file, args.dry_run)
+    write_deploy_record(
+        record_file,
+        target=target,
+        remote_dir=args.remote_dir,
+        service=args.service,
+        deploy_commit=deploy_commit,
+        previous_commit=args.previous_commit,
+        scope=args.scope,
+        include=args.include,
+        backup=backup,
+        dry_run=args.dry_run,
+    )
     print("[done] deploy flow completed")
     return 0
 
